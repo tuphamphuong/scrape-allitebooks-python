@@ -17,7 +17,7 @@ import configparser
 logger = logging.getLogger('crawl_allitebooks')
 logger.setLevel(logging.DEBUG)
 fh = logging.FileHandler('crawl_allitebooks.log')
-fh.setLevel(logging.DEBUG)
+fh.setLevel(logging.INFO)
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -33,6 +33,8 @@ logger.info("config sections %s", config.sections())
 if len(config.sections()) == 0:
     sys.exit()
 
+book_pages_path = "data/book_pages.txt"
+book_sites_path = "data/book_sites.txt"
 connection = None
 cursor = None
 
@@ -80,7 +82,32 @@ def generate_pages(from_page, to_page, sub_title):
         for i in range(from_page, to_page + 1):
             pages.append('http://www.allitebooks.com' + sub_title + '/page/' + str(i))
     logger.debug("pages: %s", pages)
+
+    # save to file
+    book_pages_file = open(book_pages_path, 'w')
+    for page in pages:
+        book_pages_file.write(page + "\n")
+
     return pages
+
+
+def crawl_pages(pages):
+    try:
+        book_sites = []
+
+        # TODO: Apply worker to make it faster
+        for page in pages:
+            book_site_of_one_page = get_book_sites_of_one_page(page)
+            book_sites.extend(book_site_of_one_page)
+
+        book_sites_file = open(book_sites_path, 'w')
+        for book_site in book_sites:
+            book_sites_file.write(book_site + "\n")
+
+        return book_sites
+    except Exception as e:
+        logger.warning("Error on %s with message %s", str(e))
+        traceback.print_exc()
 
 
 def get_book_sites_of_one_page(url):
@@ -104,7 +131,7 @@ def get_book_sites_of_one_page(url):
     return book_sites
 
 
-def process_book_data(book_site):
+def crawl_book(book_site):
     """
 	input a book site
 	find book detail in this book site
@@ -216,7 +243,7 @@ def process_book_data(book_site):
         # Insert to database
         sql = """INSERT INTO books(id, title, author_name, isbn_10, publication_year, pages, language, file_size, file_format, category_name, short_description, description, img_url, download_url_pdf, download_url_epub, download_url_mobi, source, created) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, %s);"""
         logger.info("sql %s", sql)
-        # Allitebooks source
+        # Allitebooks source = 1
         source = 1
         record_to_insert = (
             str(uuid.uuid4()), str(title), str(author_name), str(isbn_10), str(publication_year), str(pages),
@@ -235,24 +262,6 @@ def process_book_data(book_site):
         traceback.print_exc()
 
 
-def crawl_site(from_page=1, to_page=1, sub_title=''):
-    try:
-        book_sites = []
-        pages = generate_pages(from_page, to_page, sub_title)
-
-        # TODO: Apply worker to make it faster
-        for page in pages:
-            book_site_of_one_page = get_book_sites_of_one_page(page)
-            book_sites.extend(book_site_of_one_page)
-
-        # TODO: Apply worker to make it faster
-        for book_site in book_sites:
-            process_book_data(book_site)
-    except Exception as e:
-        logger.warning("Error on %s with message %s", book_site, str(e))
-        traceback.print_exc()
-
-
 def main():
     try:
         logger.info("Number of arguments: %d", len(sys.argv))
@@ -260,15 +269,52 @@ def main():
         # default args
         from_page = 1
         to_page = 2
+        # to_page = 852
         sub_title = ""
+        step = ""
 
-        if len(sys.argv) > 1:
-            from_page = sys.argv[1]
-            to_page = sys.argv[2]
-            sub_title = sys.argv[3]
+        if len(sys.argv) == 1:
+            # For debug crawl_book purpose
+            crawl_book("http://www.allitebooks.org/data-structures-and-algorithms-in-swift/")
+        if len(sys.argv) == 2:
+            step = sys.argv[2]
+        if len(sys.argv) == 4:
+            step = sys.argv[2]
+            from_page = sys.argv[3]
+            to_page = sys.argv[4]
+        if len(sys.argv) == 5:
+            step = sys.argv[2]
+            from_page = sys.argv[3]
+            to_page = sys.argv[4]
+            sub_title = sys.argv[5]
 
-        crawl_site(from_page, to_page, sub_title)
-        # process_book_data("http://www.allitebooks.org/data-structures-and-algorithms-in-swift/")
+        if step == "generate-pages":
+            logger.info("Jump to step generate-pages")
+            generate_pages(from_page, to_page, sub_title)
+        elif step == "crawl_pages":
+            logger.info("Jump to step crawl_pages")
+            try:
+                book_pages_file = open(book_pages_path, 'r')
+                pages = book_pages_file.readlines()
+                crawl_pages(pages)
+            except Exception as e:
+                logger.warning("Error on %s with message %s", str(e))
+                traceback.print_exc()
+        elif step == "crawl_books":
+            logger.info("Jump to step crawl_books")
+            try:
+                # TODO: Apply worker to make it faster
+                book_sites_file = open(book_sites_path, 'r')
+                book_sites = book_sites_file.readlines()
+                for book_site in book_sites:
+                    crawl_book(book_site)
+            except Exception as e:
+                logger.warning("Error on %s with message %s", str(e))
+                traceback.print_exc()
+        elif step == "download_resources":
+            logger.info("Jump to step download_resources")
+
+        logger.info("Program Finished")
     except Exception as e:
         logger.warning(str(e))
         traceback.print_exc()
