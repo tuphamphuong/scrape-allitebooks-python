@@ -287,6 +287,8 @@ def main():
             from_page = sys.argv[3]
             to_page = sys.argv[4]
             sub_title = sys.argv[5]
+            if sub_title == "0":
+                sub_title = ""
 
         if step == "generate-pages":
             logger.info("Jump to step generate-pages")
@@ -308,6 +310,7 @@ def main():
                 book_sites = book_sites_file.readlines()
                 for book_site in book_sites:
                     crawl_book(book_site)
+                    logger.info("Crawl success with url: %s", book_site)
             except Exception as e:
                 logger.warning("Error on %s with message %s", str(e))
                 traceback.print_exc()
