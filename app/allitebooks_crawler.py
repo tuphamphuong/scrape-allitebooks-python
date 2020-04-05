@@ -14,11 +14,14 @@ import psycopg2
 import traceback
 import uuid
 import configparser
-import wget
+import joblib
+
 from urllib.parse import urlparse
 import urllib.request
 
 # create logger with 'crawl_allitebooks'
+from joblib import Parallel, delayed
+
 logger = logging.getLogger('crawl_allitebooks')
 logger.setLevel(logging.DEBUG)
 fh = logging.FileHandler('crawl_allitebooks.log')
@@ -41,10 +44,11 @@ if len(config.sections()) == 0:
 book_pages_path = "data/book_pages.txt"
 book_sites_path = "data/book_sites.txt"
 resource_path = "/data/thedevbook/resources"
+number_of_parallelism = int(config["app"]["number_of_parallelism"])
 request_headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.47 Safari/537.36"}
 user_agent_list = [
-   #Chrome
+    # Chrome
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36',
     'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36',
     'Mozilla/5.0 (Windows NT 5.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36',
@@ -55,7 +59,7 @@ user_agent_list = [
     'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.133 Safari/537.36',
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
     'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
-    #Firefox
+    # Firefox
     'Mozilla/4.0 (compatible; MSIE 9.0; Windows NT 6.1)',
     'Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0) like Gecko',
     'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)',
@@ -160,7 +164,7 @@ def generate_pages(from_page, to_page, sub_title):
     return pages
 
 
-def crawl_pages(pages):
+def crawl_pages(pages, limit=10):
     try:
         book_sites = []
 
@@ -287,9 +291,9 @@ def crawl_book(book_site):
             elif meta_name_value == "Category:":
                 category_name = meta_value_value
                 logger.debug("category_name %s", category_name)
-        logger.debug(
-            "author_name %s isbn_10 %s publication_year %d pages %d language %s file_size %s file_format %s category_name %s",
-            author_name, isbn_10, publication_year, pages, language, file_size, file_format, category_name)
+        # logger.debug(
+        #     "author_name %s isbn_10 %s publication_year %d pages %d language %s file_size %s file_format %s category_name %s",
+        #     author_name, isbn_10, publication_year, pages, language, file_size, file_format, category_name)
 
         download_urls = []
         download_url_pdf = ""
@@ -306,8 +310,8 @@ def crawl_book(book_site):
                 download_url_epub = download_url
             elif ".mobi" in download_url:
                 download_url_mobi = download_url
-        logger.debug("download_url_pdf %s download_url_epub %s download_url_mobi %s", download_url_pdf,
-                     download_url_epub, download_url_mobi)
+        # logger.debug("download_url_pdf %s download_url_epub %s download_url_mobi %s", download_url_pdf,
+        #              download_url_epub, download_url_mobi)
 
         # Insert to database
         sql = """INSERT INTO books(id, title, author_name, isbn_10, publication_year, pages, language, file_size, file_format, category_name, short_description, description, img_url, download_url_pdf, download_url_epub, download_url_mobi, source, created) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, %s);"""
@@ -326,55 +330,64 @@ def crawl_book(book_site):
         cursor.execute(sql, record_to_insert)
         cursor.close()
         connection.commit()
+
+        logger.info("Crawl success with url: %s", book_site)
     except Exception as e:
         logger.warning(str(e))
         traceback.print_exc()
 
 
-def download_resources():
+def download_resources(limit=10):
     try:
         global connection
         cursor = connection.cursor()
-
-        cursor.execute(
-            "SELECT id, img_url, download_url_pdf, download_url_epub, download_url_mobi FROM books WHERE source = 1")
+        sql = """SELECT id, img_url, download_url_pdf, download_url_epub, download_url_mobi FROM books WHERE source = 1 LIMIT %s;"""
+        cursor.execute(sql, (limit,))
         rows = cursor.fetchall()
-        for row in rows:
-            id = row[0].strip()
-
-            dir_path = resource_path + "/" + id
-            make_dir(dir_path)
-
-            img_url = row[1]
-            if img_url.strip():
-                urlparse_img = urlparse(img_url)
-                file_name = os.path.basename(urlparse_img.path)
-                logger.info("filename %s", file_name)
-                dowload_file(img_url, dir_path, file_name)
-
-            download_url_pdf = row[2]
-            if download_url_pdf.strip():
-                urlparse_pdf = urlparse(download_url_pdf)
-                file_name = os.path.basename(urlparse_pdf.path)
-                logger.info("filename %s", file_name)
-                dowload_file(download_url_pdf, dir_path, file_name)
-
-            download_url_epub = row[3]
-            if download_url_epub.strip():
-                urlparse_epub = urlparse(download_url_epub)
-                file_name = os.path.basename(urlparse_epub.path)
-                logger.info("filename %s", file_name)
-                dowload_file(download_url_epub, dir_path, file_name)
-
-            download_url_mobi = row[4]
-            if download_url_mobi.strip():
-                urlparse_mobi = urlparse(download_url_mobi)
-                file_name = os.path.basename(urlparse_mobi.path)
-                logger.info("filename %s", file_name)
-                dowload_file(download_url_mobi, dir_path, file_name)
+        logger.info("download_resources processing %d rows", len(rows))
+        Parallel(n_jobs=number_of_parallelism)(delayed(download_resource)(row) for row in rows)
 
         cursor.close()
         connection.commit()
+    except Exception as e:
+        logger.warning(str(e))
+        traceback.print_exc()
+
+
+def download_resource(row):
+    try:
+        id = row[0].strip()
+
+        dir_path = resource_path + "/" + id
+        make_dir(dir_path)
+
+        img_url = row[1]
+        if img_url.strip():
+            urlparse_img = urlparse(img_url)
+            file_name = os.path.basename(urlparse_img.path)
+            logger.info("filename %s", file_name)
+            dowload_file(img_url, dir_path, file_name)
+
+        download_url_pdf = row[2]
+        if download_url_pdf.strip():
+            urlparse_pdf = urlparse(download_url_pdf)
+            file_name = os.path.basename(urlparse_pdf.path)
+            logger.info("filename %s", file_name)
+            dowload_file(download_url_pdf, dir_path, file_name)
+
+        download_url_epub = row[3]
+        if download_url_epub.strip():
+            urlparse_epub = urlparse(download_url_epub)
+            file_name = os.path.basename(urlparse_epub.path)
+            logger.info("filename %s", file_name)
+            dowload_file(download_url_epub, dir_path, file_name)
+
+        download_url_mobi = row[4]
+        if download_url_mobi.strip():
+            urlparse_mobi = urlparse(download_url_mobi)
+            file_name = os.path.basename(urlparse_mobi.path)
+            logger.info("filename %s", file_name)
+            dowload_file(download_url_mobi, dir_path, file_name)
     except Exception as e:
         logger.warning(str(e))
         traceback.print_exc()
@@ -387,9 +400,11 @@ def main():
 
         # default args
         from_page = 1
+        # TODO: Get max page from homepage
         to_page = 852
         sub_title = ""
         step = ""
+        limit = 10
 
         if len(sys.argv) == 1:
             # For debug crawl_book purpose
@@ -398,7 +413,7 @@ def main():
             step = sys.argv[1]
         if len(sys.argv) == 3:
             step = sys.argv[1]
-            sub_title = sys.argv[2]
+            limit = int(sys.argv[2])
 
         try:
             if step == "generate-pages":
@@ -408,18 +423,15 @@ def main():
                 logger.info("Jump to step crawl_pages")
                 book_pages_file = open(book_pages_path, 'r')
                 pages = book_pages_file.readlines()
-                crawl_pages(pages)
+                crawl_pages(pages, limit)
             elif step == "crawl_books":
                 logger.info("Jump to step crawl_books")
-                # TODO: Apply worker to make it faster
                 book_sites_file = open(book_sites_path, 'r')
                 book_sites = book_sites_file.readlines()
-                for book_site in book_sites:
-                    crawl_book(book_site)
-                    logger.info("Crawl success with url: %s", book_site)
+                Parallel(n_jobs=number_of_parallelism)(delayed(crawl_book)(book_site) for book_site in book_sites)
             elif step == "download_resources":
                 logger.info("Jump to step download_resources")
-                download_resources()
+                download_resources(limit)
         except Exception as e:
             logger.warning("Error on %s with message %s", str(e))
             traceback.print_exc()
