@@ -1,4 +1,6 @@
 #! /usr/bin/env python3.4
+import random
+
 import requests
 import os
 import sys
@@ -12,6 +14,9 @@ import psycopg2
 import traceback
 import uuid
 import configparser
+import wget
+from urllib.parse import urlparse
+import urllib.request
 
 # create logger with 'crawl_allitebooks'
 logger = logging.getLogger('crawl_allitebooks')
@@ -35,6 +40,36 @@ if len(config.sections()) == 0:
 
 book_pages_path = "data/book_pages.txt"
 book_sites_path = "data/book_sites.txt"
+resource_path = "/data/thedevbook/resources"
+request_headers = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.47 Safari/537.36"}
+user_agent_list = [
+   #Chrome
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 5.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 6.2; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/44.0.2403.157 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.133 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.133 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
+    #Firefox
+    'Mozilla/4.0 (compatible; MSIE 9.0; Windows NT 6.1)',
+    'Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0) like Gecko',
+    'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)',
+    'Mozilla/5.0 (Windows NT 6.1; Trident/7.0; rv:11.0) like Gecko',
+    'Mozilla/5.0 (Windows NT 6.2; WOW64; Trident/7.0; rv:11.0) like Gecko',
+    'Mozilla/5.0 (Windows NT 10.0; WOW64; Trident/7.0; rv:11.0) like Gecko',
+    'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.0; Trident/5.0)',
+    'Mozilla/5.0 (Windows NT 6.3; WOW64; Trident/7.0; rv:11.0) like Gecko',
+    'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0)',
+    'Mozilla/5.0 (Windows NT 6.1; Win64; x64; Trident/7.0; rv:11.0) like Gecko',
+    'Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; WOW64; Trident/6.0)',
+    'Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; Trident/6.0)',
+    'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 5.1; Trident/4.0; .NET CLR 2.0.50727; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30729)'
+]
 connection = None
 cursor = None
 
@@ -61,15 +96,49 @@ def init_db_connection():
         sys.exit()
 
 
+def make_dir(path):
+    try:
+        if not os.path.exists(path):
+            os.mkdir(path)
+    except Exception as e:
+        logger.warning(str(e))
+        traceback.print_exc()
+
+
 def get_request(url):
     """
 	using requests to replace urllib.requests.urlopen
 	return an html
 	"""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_5) AppleWebKit 537.36 (KHTML, like Gecko) Chrome"}
-    r = requests.get(url, headers=headers)
+    try:
+        r = requests.get(url, headers=request_headers)
+    except Exception as e:
+        logger.warning(str(e))
+        traceback.print_exc()
     return r.text
+
+
+def dowload_file(url, dir_path, file_name):
+    file_path = dir_path + "/" + file_name
+    # Avoid download multiple time
+    if os.path.exists(file_path):
+        logger.info("file_path existing: %s", file_path)
+        return
+
+    logger.info("dowload_file with url %s and file path %s", url, file_path)
+    try:
+        # Random select user agent
+        user_agent = random.choice(user_agent_list)
+        headers = {'User-Agent': user_agent}
+
+        r = requests.get(url, headers=headers)
+        with open(file_path, 'wb') as f:
+            f.write(r.content)
+
+
+    except Exception as e:
+        logger.warning(str(e))
+        traceback.print_exc()
 
 
 def generate_pages(from_page, to_page, sub_title):
@@ -242,7 +311,6 @@ def crawl_book(book_site):
 
         # Insert to database
         sql = """INSERT INTO books(id, title, author_name, isbn_10, publication_year, pages, language, file_size, file_format, category_name, short_description, description, img_url, download_url_pdf, download_url_epub, download_url_mobi, source, created) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, %s);"""
-        logger.info("sql %s", sql)
         # Allitebooks source = 1
         source = 1
         record_to_insert = (
@@ -251,10 +319,60 @@ def crawl_book(book_site):
             str(file_size), str(file_format), str(category_name), str(short_description), str(description),
             str(image_url),
             str(download_url_pdf), str(download_url_epub), str(download_url_mobi), source, datetime.now())
+        # logger.debug("record_to_insert: %s", record_to_insert)
 
         global connection
         cursor = connection.cursor()
         cursor.execute(sql, record_to_insert)
+        cursor.close()
+        connection.commit()
+    except Exception as e:
+        logger.warning(str(e))
+        traceback.print_exc()
+
+
+def download_resources():
+    try:
+        global connection
+        cursor = connection.cursor()
+
+        cursor.execute(
+            "SELECT id, img_url, download_url_pdf, download_url_epub, download_url_mobi FROM books WHERE source = 1")
+        rows = cursor.fetchall()
+        for row in rows:
+            id = row[0].strip()
+
+            dir_path = resource_path + "/" + id
+            make_dir(dir_path)
+
+            img_url = row[1]
+            if img_url.strip():
+                urlparse_img = urlparse(img_url)
+                file_name = os.path.basename(urlparse_img.path)
+                logger.info("filename %s", file_name)
+                dowload_file(img_url, dir_path, file_name)
+
+            download_url_pdf = row[2]
+            if download_url_pdf.strip():
+                urlparse_pdf = urlparse(download_url_pdf)
+                file_name = os.path.basename(urlparse_pdf.path)
+                logger.info("filename %s", file_name)
+                dowload_file(download_url_pdf, dir_path, file_name)
+
+            download_url_epub = row[3]
+            if download_url_epub.strip():
+                urlparse_epub = urlparse(download_url_epub)
+                file_name = os.path.basename(urlparse_epub.path)
+                logger.info("filename %s", file_name)
+                dowload_file(download_url_epub, dir_path, file_name)
+
+            download_url_mobi = row[4]
+            if download_url_mobi.strip():
+                urlparse_mobi = urlparse(download_url_mobi)
+                file_name = os.path.basename(urlparse_mobi.path)
+                logger.info("filename %s", file_name)
+                dowload_file(download_url_mobi, dir_path, file_name)
+
         cursor.close()
         connection.commit()
     except Exception as e:
@@ -282,32 +400,29 @@ def main():
             step = sys.argv[1]
             sub_title = sys.argv[2]
 
-        if step == "generate-pages":
-            logger.info("Jump to step generate-pages")
-            generate_pages(from_page, to_page, sub_title)
-        elif step == "crawl_pages":
-            logger.info("Jump to step crawl_pages")
-            try:
+        try:
+            if step == "generate-pages":
+                logger.info("Jump to step generate-pages")
+                generate_pages(from_page, to_page, sub_title)
+            elif step == "crawl_pages":
+                logger.info("Jump to step crawl_pages")
                 book_pages_file = open(book_pages_path, 'r')
                 pages = book_pages_file.readlines()
                 crawl_pages(pages)
-            except Exception as e:
-                logger.warning("Error on %s with message %s", str(e))
-                traceback.print_exc()
-        elif step == "crawl_books":
-            logger.info("Jump to step crawl_books")
-            try:
+            elif step == "crawl_books":
+                logger.info("Jump to step crawl_books")
                 # TODO: Apply worker to make it faster
                 book_sites_file = open(book_sites_path, 'r')
                 book_sites = book_sites_file.readlines()
                 for book_site in book_sites:
                     crawl_book(book_site)
                     logger.info("Crawl success with url: %s", book_site)
-            except Exception as e:
-                logger.warning("Error on %s with message %s", str(e))
-                traceback.print_exc()
-        elif step == "download_resources":
-            logger.info("Jump to step download_resources")
+            elif step == "download_resources":
+                logger.info("Jump to step download_resources")
+                download_resources()
+        except Exception as e:
+            logger.warning("Error on %s with message %s", str(e))
+            traceback.print_exc()
 
         logger.info("Program Finished")
     except Exception as e:
