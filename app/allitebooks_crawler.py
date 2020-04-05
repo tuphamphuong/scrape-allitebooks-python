@@ -265,11 +265,11 @@ def crawl_book(book_site):
 def main():
     try:
         logger.info("Number of arguments: %d", len(sys.argv))
+        logger.info("Arguments: %s", sys.argv)
 
         # default args
         from_page = 1
-        to_page = 2
-        # to_page = 852
+        to_page = 852
         sub_title = ""
         step = ""
 
@@ -277,18 +277,10 @@ def main():
             # For debug crawl_book purpose
             crawl_book("http://www.allitebooks.org/data-structures-and-algorithms-in-swift/")
         if len(sys.argv) == 2:
-            step = sys.argv[2]
-        if len(sys.argv) == 4:
-            step = sys.argv[2]
-            from_page = sys.argv[3]
-            to_page = sys.argv[4]
-        if len(sys.argv) == 5:
-            step = sys.argv[2]
-            from_page = sys.argv[3]
-            to_page = sys.argv[4]
-            sub_title = sys.argv[5]
-            if sub_title == "0":
-                sub_title = ""
+            step = sys.argv[1]
+        if len(sys.argv) == 3:
+            step = sys.argv[1]
+            sub_title = sys.argv[2]
 
         if step == "generate-pages":
             logger.info("Jump to step generate-pages")
