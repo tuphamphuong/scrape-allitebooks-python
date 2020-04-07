@@ -388,6 +388,7 @@ def download_resource(row):
             file_name = os.path.basename(urlparse_mobi.path)
             logger.info("filename %s", file_name)
             dowload_file(download_url_mobi, dir_path, file_name)
+        logger.info("download_resources id %s success", id)
     except Exception as e:
         logger.warning(str(e))
         traceback.print_exc()
@@ -401,7 +402,6 @@ def main():
         # default args
         from_page = 1
         # TODO: Get max page from homepage
-        to_page = 852
         sub_title = ""
         step = ""
         limit = 10
@@ -414,6 +414,8 @@ def main():
         if len(sys.argv) == 3:
             step = sys.argv[1]
             limit = int(sys.argv[2])
+
+        to_page = from_page + limit
 
         try:
             if step == "generate-pages":
